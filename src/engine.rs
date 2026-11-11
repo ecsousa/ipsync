@@ -5,7 +5,7 @@ use crate::providers::{Provider, create_provider};
 use anyhow::{Context, Result, anyhow, bail};
 use std::collections::HashMap;
 use std::net::IpAddr;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 pub struct WatcherState {
     pub source: String,
@@ -19,17 +19,23 @@ impl WatcherState {
     pub fn from_config(cfg: &WatcherConfig) -> Result<Self> {
         let mut includes = Vec::new();
         for inc_str in cfg.all_includes() {
-            let filter: IpFilter = inc_str
-                .parse()
-                .with_context(|| format!("invalid include filter '{}' in watcher '{}'", inc_str, cfg.source))?;
+            let filter: IpFilter = inc_str.parse().with_context(|| {
+                format!(
+                    "invalid include filter '{}' in watcher '{}'",
+                    inc_str, cfg.source
+                )
+            })?;
             includes.push(filter);
         }
 
         let mut excludes = Vec::new();
         for exc_str in cfg.all_excludes() {
-            let filter: IpFilter = exc_str
-                .parse()
-                .with_context(|| format!("invalid exclude filter '{}' in watcher '{}'", exc_str, cfg.source))?;
+            let filter: IpFilter = exc_str.parse().with_context(|| {
+                format!(
+                    "invalid exclude filter '{}' in watcher '{}'",
+                    exc_str, cfg.source
+                )
+            })?;
             excludes.push(filter);
         }
 
@@ -51,11 +57,12 @@ impl WatcherState {
 pub struct DdnsEngine {
     providers: HashMap<String, Box<dyn Provider>>,
     watchers: Vec<WatcherState>,
+    dry_run: bool,
 }
 
 impl DdnsEngine {
-    /// Builds and initializes a `DdnsEngine` from `AppConfig`.
-    pub async fn from_config(app_cfg: &AppConfig) -> Result<Self> {
+    /// Builds, validates, and initializes a `DdnsEngine` from `AppConfig`.
+    pub async fn from_config(app_cfg: &AppConfig, dry_run: bool) -> Result<Self> {
         let mut providers: HashMap<String, Box<dyn Provider>> = HashMap::new();
 
         // Register hardcoded `local` provider instance
@@ -67,6 +74,9 @@ impl DdnsEngine {
         for prov_cfg in &app_cfg.providers {
             if prov_cfg.name == "local" {
                 bail!("provider instance name 'local' is reserved for the built-in local provider");
+            }
+            if providers.contains_key(&prov_cfg.name) {
+                bail!("duplicate provider instance name '{}'", prov_cfg.name);
             }
             let mut provider = create_provider(&prov_cfg.provider_type).with_context(|| {
                 format!(
@@ -84,24 +94,30 @@ impl DdnsEngine {
         let mut watchers = Vec::with_capacity(app_cfg.watchers.len());
         for w_cfg in &app_cfg.watchers {
             let watcher = WatcherState::from_config(w_cfg)?;
-            // Validate referenced source and target provider instances exist
-            let (src_prov, _) = parse_endpoint(&watcher.source);
-            if !providers.contains_key(src_prov) {
+            let (src_prov, src_param) = parse_endpoint(&watcher.source);
+            let Some(src_provider) = providers.get(src_prov) else {
                 bail!(
                     "watcher source '{}' references unknown provider instance '{}'",
                     watcher.source,
                     src_prov
                 );
-            }
+            };
+            src_provider
+                .validate_source(src_param)
+                .with_context(|| format!("invalid watcher source '{}'", watcher.source))?;
+
             for target in &watcher.targets {
-                let (tgt_prov, _) = parse_endpoint(target);
-                if !providers.contains_key(tgt_prov) {
+                let (tgt_prov, tgt_param) = parse_endpoint(target);
+                let Some(tgt_provider) = providers.get(tgt_prov) else {
                     bail!(
                         "watcher target '{}' references unknown provider instance '{}'",
                         target,
                         tgt_prov
                     );
-                }
+                };
+                tgt_provider
+                    .validate_target(tgt_param)
+                    .with_context(|| format!("invalid watcher target '{}'", target))?;
             }
             watchers.push(watcher);
         }
@@ -109,6 +125,7 @@ impl DdnsEngine {
         Ok(Self {
             providers,
             watchers,
+            dry_run,
         })
     }
 
@@ -117,17 +134,20 @@ impl DdnsEngine {
     pub fn with_providers(
         providers: HashMap<String, Box<dyn Provider>>,
         watchers: Vec<WatcherState>,
+        dry_run: bool,
     ) -> Self {
         Self {
             providers,
             watchers,
+            dry_run,
         }
     }
 
     /// Executes a single check-and-update cycle across all configured watchers.
     pub async fn run_cycle(&mut self) {
+        let dry_run = self.dry_run;
         for watcher in &mut self.watchers {
-            if let Err(err) = Self::process_watcher(&self.providers, watcher).await {
+            if let Err(err) = Self::process_watcher(&self.providers, watcher, dry_run).await {
                 error!("Error processing watcher '{}': {:#}", watcher.source, err);
             }
         }
@@ -136,6 +156,7 @@ impl DdnsEngine {
     async fn process_watcher(
         providers: &HashMap<String, Box<dyn Provider>>,
         watcher: &mut WatcherState,
+        dry_run: bool,
     ) -> Result<()> {
         let (src_instance, src_param) = parse_endpoint(&watcher.source);
         let src_provider = providers
@@ -148,22 +169,20 @@ impl DdnsEngine {
             .with_context(|| format!("failed to get IPs from source '{}'", watcher.source))?;
 
         debug!(
-            "Source '{}' returned {} raw IP(s): {:?}",
-            watcher.source,
-            raw_ips.len(),
-            raw_ips
+            "Provider read [source '{}']: {:?}",
+            watcher.source, raw_ips
         );
 
         let filtered_ips = apply_filters(raw_ips, &watcher.includes, &watcher.excludes);
         debug!(
-            "Source '{}' after filtering has {} IP(s): {:?}",
+            "Filter result [source '{}']: matched {:?} (selected: {:?})",
             watcher.source,
-            filtered_ips.len(),
-            filtered_ips
+            filtered_ips,
+            filtered_ips.first()
         );
 
         let Some(&current_ip) = filtered_ips.first() else {
-            warn!(
+            debug!(
                 "No matching IP address found for watcher source '{}'",
                 watcher.source
             );
@@ -172,14 +191,14 @@ impl DdnsEngine {
 
         if watcher.last_ip == Some(current_ip) {
             debug!(
-                "Watcher '{}': IP {} unchanged since last check; skipping target checks",
+                "Comparison result [source '{}']: current IP {} matches last checked IP; skipping target checks",
                 watcher.source, current_ip
             );
             return Ok(());
         }
 
-        info!(
-            "Watcher '{}': IP is {} (previous: {:?}); verifying targets",
+        debug!(
+            "Comparison result [source '{}']: current IP {} differs from last checked IP ({:?}); checking targets",
             watcher.source, current_ip, watcher.last_ip
         );
 
@@ -193,7 +212,15 @@ impl DdnsEngine {
                 continue;
             };
 
-            match Self::sync_target(tgt_provider.as_ref(), target, tgt_param, current_ip).await {
+            match Self::sync_target(
+                tgt_provider.as_ref(),
+                target,
+                tgt_param,
+                current_ip,
+                dry_run,
+            )
+            .await
+            {
                 Ok(()) => {}
                 Err(err) => {
                     error!(
@@ -217,11 +244,17 @@ impl DdnsEngine {
         target_full: &str,
         tgt_param: &str,
         current_ip: IpAddr,
+        dry_run: bool,
     ) -> Result<()> {
         let existing_ips = tgt_provider
             .get(tgt_param)
             .await
             .with_context(|| format!("failed to get current IPs from target '{}'", target_full))?;
+
+        debug!(
+            "Provider read [target '{}']: {:?}",
+            target_full, existing_ips
+        );
 
         // Compare against existing target addresses of the same IP family (IPv4 vs IPv4, IPv6 vs IPv6)
         let same_family: Vec<IpAddr> = existing_ips
@@ -230,17 +263,27 @@ impl DdnsEngine {
             .collect();
 
         if same_family.len() == 1 && same_family[0] == current_ip {
+            debug!(
+                "Comparison result [target '{}']: existing address for family {:?} matches {}; no update needed",
+                target_full, same_family, current_ip
+            );
+            return Ok(());
+        }
+
+        debug!(
+            "Comparison result [target '{}']: existing address for family {:?} differs from {}; update needed",
+            target_full, same_family, current_ip
+        );
+
+        if dry_run {
             info!(
-                "Target '{}' already has matching address {}; no update needed",
+                "[DRY RUN] Would set '{}' to {}",
                 target_full, current_ip
             );
             return Ok(());
         }
 
-        info!(
-            "Target '{}' current address for family is {:?}, updating to {}",
-            target_full, same_family, current_ip
-        );
+        info!("Setting '{}' to {}", target_full, current_ip);
         tgt_provider
             .set(tgt_param, current_ip)
             .await
@@ -352,7 +395,7 @@ mod tests {
         })
         .unwrap();
 
-        let mut engine = DdnsEngine::with_providers(providers, vec![w_v6, w_v4]);
+        let mut engine = DdnsEngine::with_providers(providers, vec![w_v6, w_v4], false);
 
         // Cycle 1 (initial run):
         // - w_v6 filters down to 2600:1700::6, sees AAAA missing on CF, calls set
@@ -386,5 +429,63 @@ mod tests {
                 "10.0.0.25".parse::<IpAddr>().unwrap()
             )
         );
+    }
+
+    #[tokio::test]
+    async fn test_engine_dry_run_does_not_call_set() {
+        let local_mock = MockProvider::new_with_ips("ipv4", vec!["10.0.0.42".parse().unwrap()]);
+        let cf_mock = MockProvider::new_with_ips("nas.example.com", vec![]);
+
+        let mut providers: HashMap<String, Box<dyn Provider>> = HashMap::new();
+        providers.insert("local".to_string(), Box::new(local_mock));
+        providers.insert("example.com".to_string(), Box::new(cf_mock.clone()));
+
+        let watcher = WatcherState::from_config(&WatcherConfig {
+            source: "local:ipv4".to_string(),
+            include: None,
+            includes: vec![],
+            exclude: None,
+            excludes: vec![],
+            target: Some("example.com:nas.example.com".to_string()),
+            targets: vec![],
+        })
+        .unwrap();
+
+        let mut engine = DdnsEngine::with_providers(providers, vec![watcher], true);
+        engine.run_cycle().await;
+
+        // Target was read for comparison, but set was NOT called in dry-run mode
+        assert_eq!(*cf_mock.get_calls.lock().unwrap(), 1);
+        assert!(cf_mock.set_calls.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_engine_config_validation_errors() {
+        let bad_local_target_yaml = r#"
+config:
+  pooling: 5m
+providers: []
+watchers:
+  - source: local:ipv4
+    target: local:ipv4
+"#;
+        let cfg = AppConfig::from_yaml_str(bad_local_target_yaml).unwrap();
+        assert!(DdnsEngine::from_config(&cfg, true).await.is_err());
+
+        let bad_unifi_target_yaml = r#"
+config:
+  pooling: 5m
+providers:
+  - name: site-a
+    type: unifi
+    config:
+      - host: unifi.site-a.example.com
+      - apikey: secret
+watchers:
+  - source: local:ipv4
+    target: site-a:wan1.ipv4
+"#;
+        let cfg2 = AppConfig::from_yaml_str(bad_unifi_target_yaml).unwrap();
+        assert!(DdnsEngine::from_config(&cfg2, true).await.is_err());
     }
 }

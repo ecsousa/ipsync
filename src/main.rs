@@ -8,7 +8,7 @@ use clap::Parser;
 use config::AppConfig;
 use engine::DdnsEngine;
 use std::path::PathBuf;
-use tracing::info;
+use tracing::{debug, error};
 
 #[derive(Parser, Debug)]
 #[command(
@@ -26,6 +26,10 @@ struct Args {
     #[arg(short, long)]
     once: bool,
 
+    /// Validate config, enable verbose logging, run once, and log actions without making changes
+    #[arg(short, long)]
+    dry_run: bool,
+
     /// Enable verbose (debug) logging
     #[arg(short, long)]
     verbose: bool,
@@ -34,7 +38,6 @@ struct Args {
 #[cfg(target_os = "linux")]
 fn notify_systemd_ready() {
     use sd_notify::NotifyState;
-    use tracing::debug;
     if let Err(e) = sd_notify::notify(
         false,
         &[
@@ -77,50 +80,46 @@ async fn wait_for_shutdown_signal() {
     #[cfg(unix)]
     {
         use tokio::signal::unix::{SignalKind, signal};
-        let mut sigterm = signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
+        let mut sigterm =
+            signal(SignalKind::terminate()).expect("failed to install SIGTERM handler");
         tokio::select! {
             _ = tokio::signal::ctrl_c() => {
-                info!("Received SIGINT, shutting down...");
+                debug!("Received SIGINT, shutting down...");
             }
             _ = sigterm.recv() => {
-                info!("Received SIGTERM, shutting down...");
+                debug!("Received SIGTERM, shutting down...");
             }
         }
     }
     #[cfg(not(unix))]
     {
         let _ = tokio::signal::ctrl_c().await;
-        info!("Received Ctrl+C / stop signal, shutting down...");
+        debug!("Received Ctrl+C / stop signal, shutting down...");
     }
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
-    let default_filter = if args.verbose { "debug" } else { "info" };
-    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
-
-    tracing_subscriber::fmt().with_env_filter(env_filter).init();
-
-    info!("Loading configuration from {:?}", args.config);
+async fn run(args: Args) -> Result<()> {
+    debug!("Loading configuration from {:?}", args.config);
     let app_config = AppConfig::from_file(&args.config)?;
     let poll_interval = app_config.config.pooling;
 
-    let mut engine = DdnsEngine::from_config(&app_config).await?;
+    let mut engine = DdnsEngine::from_config(&app_config, args.dry_run).await?;
+    debug!("Configuration validated and providers initialized successfully");
 
     notify_systemd_ready();
 
-    if args.once {
-        info!("Running single check cycle (--once)");
+    if args.dry_run || args.once {
+        debug!(
+            "Running single check cycle (dry_run={}, once={})",
+            args.dry_run, args.once
+        );
         notify_systemd_status("Running single check cycle");
         engine.run_cycle().await;
         notify_systemd_stopping();
         return Ok(());
     }
 
-    info!(
+    debug!(
         "Starting polling loop with interval {}",
         humantime::format_duration(poll_interval)
     );
@@ -142,6 +141,30 @@ async fn main() -> Result<()> {
         }
     }
 
-    info!("ddnsplus stopped cleanly");
+    debug!("ddnsplus stopped cleanly");
     Ok(())
+}
+
+#[tokio::main]
+async fn main() {
+    let args = Args::parse();
+
+    let verbose = args.verbose || args.dry_run;
+    let default_filter = if verbose {
+        "ddnsplus=debug"
+    } else {
+        "ddnsplus=info"
+    };
+    let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));
+
+    tracing_subscriber::fmt()
+        .with_writer(std::io::stdout)
+        .with_env_filter(env_filter)
+        .init();
+
+    if let Err(err) = run(args).await {
+        error!("Fatal error: {:#}", err);
+        std::process::exit(1);
+    }
 }

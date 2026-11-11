@@ -27,7 +27,7 @@ impl Provider for LocalProvider {
         Ok(())
     }
 
-    async fn get(&self, name: &str) -> Result<Vec<IpAddr>> {
+    fn validate_source(&self, name: &str) -> Result<()> {
         let selector = name.trim().to_ascii_lowercase();
         if !selector.is_empty() && selector != "ipv4" && selector != "ipv6" {
             bail!(
@@ -35,6 +35,16 @@ impl Provider for LocalProvider {
                 name
             );
         }
+        Ok(())
+    }
+
+    fn validate_target(&self, _name: &str) -> Result<()> {
+        bail!("local provider is read-only and does not support setting IP addresses")
+    }
+
+    async fn get(&self, name: &str) -> Result<Vec<IpAddr>> {
+        self.validate_source(name)?;
+        let selector = name.trim().to_ascii_lowercase();
 
         let interfaces = if_addrs::get_if_addrs()
             .map_err(|e| anyhow!("failed to enumerate local network interfaces: {}", e))?;

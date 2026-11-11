@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::net::IpAddr;
 use std::time::Duration;
 use tokio::sync::OnceCell;
-use tracing::{debug, info};
+use tracing::debug;
 
 const DEFAULT_CF_API_BASE: &str = "https://api.cloudflare.com/client/v4";
 
@@ -119,6 +119,20 @@ impl Provider for CloudflareProvider {
         self.zone = zone;
         self.apikey = apikey;
         self.zone_id = OnceCell::new();
+        Ok(())
+    }
+
+    fn validate_source(&self, name: &str) -> Result<()> {
+        if name.trim().is_empty() {
+            bail!("cloudflare source requires a DNS record name");
+        }
+        Ok(())
+    }
+
+    fn validate_target(&self, name: &str) -> Result<()> {
+        if name.trim().is_empty() {
+            bail!("cloudflare target requires a DNS record name");
+        }
         Ok(())
     }
 
@@ -252,7 +266,7 @@ impl Provider for CloudflareProvider {
                 "{}/zones/{}/dns_records/{}",
                 self.api_base, zone_id, record_id
             );
-            info!(
+            debug!(
                 "Updating Cloudflare {} record for '{}' -> {}",
                 record_type, name, ip
             );
@@ -265,7 +279,7 @@ impl Provider for CloudflareProvider {
                 .with_context(|| format!("failed to update DNS record '{}'", name))?
         } else {
             let create_url = format!("{}/zones/{}/dns_records", self.api_base, zone_id);
-            info!(
+            debug!(
                 "Creating Cloudflare {} record for '{}' -> {}",
                 record_type, name, ip
             );

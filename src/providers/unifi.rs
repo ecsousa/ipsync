@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::debug;
 
 #[derive(Debug, Deserialize)]
 struct UnifiEnvelope<T> {
@@ -184,7 +184,7 @@ impl UnifiProvider {
             "{}/proxy/network/api/s/default/rest/networkconf/{}",
             self.base_url, id
         );
-        info!(
+        debug!(
             "Updating UniFi VPN client '{}' (id: {}) peer IP -> {}",
             vpn_name, id, ip
         );
@@ -266,6 +266,39 @@ impl Provider for UnifiProvider {
 
         self.apikey = apikey;
         Ok(())
+    }
+
+    fn validate_source(&self, name: &str) -> Result<()> {
+        let name = name.trim();
+        match name {
+            "wan1.ipv4" | "wan1.ipv6" | "wan2.ipv4" | "wan2.ipv6" => Ok(()),
+            _ if name.starts_with("vpnclient:") => {
+                let vpn_name = name["vpnclient:".len()..].trim();
+                if vpn_name.is_empty() {
+                    bail!("unifi vpnclient selector requires a name (vpnclient:$NAME)");
+                }
+                Ok(())
+            }
+            other => bail!(
+                "unsupported unifi get selector '{}': expected wan1.ipv4, wan1.ipv6, wan2.ipv4, wan2.ipv6, or vpnclient:$NAME",
+                other
+            ),
+        }
+    }
+
+    fn validate_target(&self, name: &str) -> Result<()> {
+        let name = name.trim();
+        if let Some(vpn_name) = name.strip_prefix("vpnclient:") {
+            if vpn_name.trim().is_empty() {
+                bail!("unifi vpnclient selector requires a name (vpnclient:$NAME)");
+            }
+            Ok(())
+        } else {
+            bail!(
+                "unsupported unifi set selector '{}': only 'vpnclient:$NAME' can be updated",
+                name
+            )
+        }
     }
 
     async fn get(&self, name: &str) -> Result<Vec<IpAddr>> {

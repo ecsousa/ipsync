@@ -13,6 +13,16 @@ pub trait Provider: Send + Sync {
     /// Initializes the provider instance using settings from its `config` block.
     async fn initialize(&mut self, config: &HashMap<String, String>) -> Result<()>;
 
+    /// Validates that `name` is a valid selector when this provider is used as a watcher `source`.
+    fn validate_source(&self, _name: &str) -> Result<()> {
+        Ok(())
+    }
+
+    /// Validates that `name` is a valid selector when this provider is used as a watcher `target`.
+    fn validate_target(&self, _name: &str) -> Result<()> {
+        Ok(())
+    }
+
     /// Returns the list of IPs for the provided selector/name (the part after `<instance>:`).
     async fn get(&self, name: &str) -> Result<Vec<IpAddr>>;
 

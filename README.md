@@ -27,6 +27,7 @@ ddnsplus [OPTIONS]
 Options:
   -c, --config <CONFIG>  Path to the YAML configuration file [default: config.yaml]
   -o, --once             Execute a single check cycle and exit
+  -d, --dry-run          Validate config, enable verbose logging, run once, and log actions without making changes
   -v, --verbose          Enable verbose (debug) logging
   -h, --help             Print help
   -V, --version          Print version
