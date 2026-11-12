@@ -1,5 +1,5 @@
 /target
-config.yaml
+*.yaml
 .DS_Store
 .idea/
 .vscode/
