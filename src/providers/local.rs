@@ -61,7 +61,7 @@ pub(crate) fn classify_interface_by_name(name: &str) -> InterfacePriority {
     // 2. Virtual - Container networks (Docker, Podman, Kubernetes, LXC, etc.)
     if lower.starts_with("docker")
         || lower.starts_with("br-")
-        || lower.starts_with("veth")
+        || (lower.starts_with("veth") && !lower.starts_with("vethernet"))
         || lower.starts_with("cni")
         || lower.starts_with("flannel")
         || lower.starts_with("cali")
