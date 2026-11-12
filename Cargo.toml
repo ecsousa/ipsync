@@ -1,9 +1,10 @@
 [package]
-name = "ddnsplus"
+name = "ipsync"
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.99.1"
 description = "Cross-platform Dynamic DNS and IP synchronization client"
+repository = "https://github.com/ecsousa/ipsync"
 
 [dependencies]
 anyhow = "1.0"

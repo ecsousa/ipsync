@@ -213,30 +213,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "ddnsplus"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "clap",
- "humantime",
- "humantime-serde",
- "if-addrs",
- "reqwest",
- "sd-notify",
- "serde",
- "serde_json",
- "serde_yaml",
- "tempfile",
- "thiserror",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "urlencoding",
- "wiremock",
-]
-
-[[package]]
 name = "deadpool"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -712,6 +688,30 @@ name = "ipnet"
 version = "2.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "791930b43c0d5973160d90a8f3894509f2b273430f5c5c73b668636d0287c5c0"
+
+[[package]]
+name = "ipsync"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "humantime",
+ "humantime-serde",
+ "if-addrs",
+ "reqwest",
+ "sd-notify",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "urlencoding",
+ "wiremock",
+]
 
 [[package]]
 name = "is_terminal_polyfill"

@@ -12,7 +12,7 @@ use tracing::{debug, error};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "ddnsplus",
+    name = "ipsync",
     author,
     version,
     about = "Cross-platform Dynamic DNS and IP synchronization client"
@@ -42,7 +42,7 @@ fn notify_systemd_ready() {
         false,
         &[
             NotifyState::Ready,
-            NotifyState::Status("ddnsplus initialized and monitoring IPs"),
+            NotifyState::Status("ipsync initialized and monitoring IPs"),
         ],
     ) {
         debug!("systemd notify (ready) skipped or failed: {}", e);
@@ -68,7 +68,7 @@ fn notify_systemd_stopping() {
         false,
         &[
             NotifyState::Stopping,
-            NotifyState::Status("Shutting down ddnsplus"),
+            NotifyState::Status("Shutting down ipsync"),
         ],
     );
 }
@@ -141,7 +141,7 @@ async fn run(args: Args) -> Result<()> {
         }
     }
 
-    debug!("ddnsplus stopped cleanly");
+    debug!("ipsync stopped cleanly");
     Ok(())
 }
 
@@ -151,9 +151,9 @@ async fn main() {
 
     let verbose = args.verbose || args.dry_run;
     let default_filter = if verbose {
-        "ddnsplus=debug"
+        "ipsync=debug"
     } else {
-        "ddnsplus=info"
+        "ipsync=info"
     };
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new(default_filter));

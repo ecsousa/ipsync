@@ -1,12 +1,14 @@
-# ddnsplus
+# ipsync
 
-`ddnsplus` is a single-binary, cross-platform Dynamic DNS (DDNS) and IP synchronization client written in Rust.
+`ipsync` is a single-binary, cross-platform Dynamic DNS (DDNS) and IP synchronization client written in Rust.
 
-Unlike traditional DDNS clients that only query a single local/public IP and update a DNS record, `ddnsplus` decouples **IP sources** from **IP targets** through a unified `Provider` interface:
+Unlike traditional DDNS clients that only query a single local/public IP and update a DNS record, `ipsync` decouples **IP sources** from **IP targets** through a unified `Provider` interface:
 - Obtain IPv4 and IPv6 addresses from multiple sources (local network interfaces, UniFi router WAN interfaces, etc.).
 - Filter discovered IP addresses using standard CIDR prefixes (`192.168.0.0/16`, `fd00::/7`) or arbitrary bitmasks (`::6/::ffff:ffff:ffff:ffff`).
 - Update IP addresses across multiple target systems (Cloudflare `A`/`AAAA` DNS records, UniFi WireGuard VPN Client endpoints, etc.).
 - Run natively as a service on **Linux** (`systemd` with `sd_notify`), **macOS** (`LaunchDaemon`), and **Windows** (`NSSM`).
+
+Repository: [https://github.com/ecsousa/ipsync](https://github.com/ecsousa/ipsync)
 
 ---
 
@@ -22,7 +24,7 @@ Unlike traditional DDNS clients that only query a single local/public IP and upd
 ## Command-Line Usage
 
 ```bash
-ddnsplus [OPTIONS]
+ipsync [OPTIONS]
 
 Options:
   -c, --config <CONFIG>  Path to the YAML configuration file [default: config.yaml]
@@ -83,7 +85,7 @@ watchers:
 ### Configuration Sections
 
 #### 1. `config`
-- `pooling` (or `polling`): How frequently `ddnsplus` checks watchers (e.g., `30s`, `5m`, `1h`).
+- `pooling` (or `polling`): How frequently `ipsync` checks watchers (e.g., `30s`, `5m`, `1h`).
 
 #### 2. `providers`
 Defines named provider instances. Note that the `local` provider instance is always built-in under the name `local` and does not need to be declared in `providers`.
@@ -107,19 +109,19 @@ Each watcher links a `source` (`<provider_instance>:<selector>`) to one or more 
 
 ### Linux (`systemd` with `Type=notify`)
 
-`ddnsplus` natively supports `systemd` readiness, status, and stopping notifications via `NOTIFY_SOCKET`.
+`ipsync` natively supports `systemd` readiness, status, and stopping notifications via `NOTIFY_SOCKET`.
 
-Create `/etc/systemd/system/ddnsplus.service`:
+Create `/etc/systemd/system/ipsync.service`:
 
 ```ini
 [Unit]
-Description=ddnsplus Dynamic DNS and IP Synchronization Client
+Description=ipsync Dynamic DNS and IP Synchronization Client
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=notify
-ExecStart=/usr/local/bin/ddnsplus --config /etc/ddnsplus/config.yaml
+ExecStart=/usr/local/bin/ipsync --config /etc/ipsync/config.yaml
 Restart=on-failure
 RestartSec=10
 
@@ -131,15 +133,15 @@ Enable and start the service:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now ddnsplus
-sudo systemctl status ddnsplus
+sudo systemctl enable --now ipsync
+sudo systemctl status ipsync
 ```
 
 ---
 
 ### macOS (`LaunchDaemon`)
 
-Create `/Library/LaunchDaemons/com.example.ddnsplus.plist`:
+Create `/Library/LaunchDaemons/com.example.ipsync.plist`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -147,13 +149,13 @@ Create `/Library/LaunchDaemons/com.example.ddnsplus.plist`:
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.example.ddnsplus</string>
+  <string>com.example.ipsync</string>
 
   <key>ProgramArguments</key>
   <array>
-    <string>/usr/local/bin/ddnsplus</string>
+    <string>/usr/local/bin/ipsync</string>
     <string>--config</string>
-    <string>/usr/local/etc/ddnsplus/config.yaml</string>
+    <string>/usr/local/etc/ipsync/config.yaml</string>
   </array>
 
   <key>RunAtLoad</key>
@@ -162,9 +164,9 @@ Create `/Library/LaunchDaemons/com.example.ddnsplus.plist`:
   <true/>
 
   <key>StandardOutPath</key>
-  <string>/var/log/ddnsplus.log</string>
+  <string>/var/log/ipsync.log</string>
   <key>StandardErrorPath</key>
-  <string>/var/log/ddnsplus.err</string>
+  <string>/var/log/ipsync.err</string>
 </dict>
 </plist>
 ```
@@ -172,23 +174,23 @@ Create `/Library/LaunchDaemons/com.example.ddnsplus.plist`:
 Load and start the daemon:
 
 ```bash
-sudo chown root:wheel /Library/LaunchDaemons/com.example.ddnsplus.plist
-sudo chmod 644 /Library/LaunchDaemons/com.example.ddnsplus.plist
-sudo launchctl bootstrap system /Library/LaunchDaemons/com.example.ddnsplus.plist
+sudo chown root:wheel /Library/LaunchDaemons/com.example.ipsync.plist
+sudo chmod 644 /Library/LaunchDaemons/com.example.ipsync.plist
+sudo launchctl bootstrap system /Library/LaunchDaemons/com.example.ipsync.plist
 ```
 
 ---
 
 ### Windows (`NSSM` - Non-Sucking Service Manager)
 
-Install and configure `ddnsplus` as a Windows service using `nssm.exe` from an elevated PowerShell or Command Prompt:
+Install and configure `ipsync` as a Windows service using `nssm.exe` from an elevated PowerShell or Command Prompt:
 
 ```powershell
-nssm install ddnsplus "C:\Program Files\ddnsplus\ddnsplus.exe" "--config \"C:\ProgramData\ddnsplus\config.yaml\""
-nssm set ddnsplus AppDirectory "C:\Program Files\ddnsplus"
-nssm set ddnsplus AppStdout "C:\ProgramData\ddnsplus\ddnsplus.log"
-nssm set ddnsplus AppStderr "C:\ProgramData\ddnsplus\ddnsplus-error.log"
-nssm start ddnsplus
+nssm install ipsync "C:\Program Files\ipsync\ipsync.exe" "--config \"C:\ProgramData\ipsync\config.yaml\""
+nssm set ipsync AppDirectory "C:\Program Files\ipsync"
+nssm set ipsync AppStdout "C:\ProgramData\ipsync\ipsync.log"
+nssm set ipsync AppStderr "C:\ProgramData\ipsync\ipsync-error.log"
+nssm start ipsync
 ```
 
 ---
